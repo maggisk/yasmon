@@ -3,14 +3,15 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"math"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
+
 
 type Status struct {
 	name, value string
@@ -36,8 +37,8 @@ func consumer(name string, ch chan string, master chan Status) {
 
 func main() {
 	master := make(chan Status)
-
 	values := make(map[string]string)
+
 	template := Configure(func(name string, producer func(chan string)) {
 		name = "{"+name+"}"
 		values[name] = ""
@@ -57,13 +58,16 @@ func main() {
 
 func checkErr(err error) {
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 }
 
 func bash(cmd string) string {
 	out, err := exec.Command("bash", "-c", cmd).Output()
-	checkErr(err)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Command `%s` failed with `%s`. Maybe there is a dependency missing?\n", cmd, err)
+		return ""
+	}
 	return strings.TrimSpace(string(out))
 }
 
@@ -77,6 +81,15 @@ func tick(interval time.Duration) <-chan time.Time {
 		}
 	}()
 	return ch
+}
+
+func newMonitor(s string, args ...string) *bufio.Reader {
+	cmd := exec.Command(s, args...)
+	stdout, err := cmd.StdoutPipe()
+	checkErr(err)
+	reader := bufio.NewReader(stdout)
+	cmd.Start()
+	return reader
 }
 
 func KbLayoutComp(interval time.Duration) func(chan string) {
@@ -111,29 +124,25 @@ func BatteryFormat(charging bool, percent float64) string {
 	// We could pick more precise icons based on battery percentage but...
 	icon := ""
 	if charging {
-		icon = ""
+		icon = " "
 	} else {
-		icon = ""
+		icon = " "
 	}
 
-	return fmt.Sprintf("%s %.0f%%", icon, math.Round(percent))
+	return fmt.Sprintf("%s%.0f%%", icon, percent)
 }
 
 func VolumeComp(ch chan string) {
-	cmd := exec.Command("stdbuf", "-oL", "alsactl", "monitor")
-	stdout, err := cmd.StdoutPipe()
-	checkErr(err)
-	reader := bufio.NewReader(stdout)
-	cmd.Start()
+	monitor := newMonitor("stdbuf", "-oL", "alsactl", "monitor")
 	for {
 		ch <- bash(`amixer sget Master | grep 'Left:' | awk -F'[][]' '{ print $2 }'`)
-		reader.ReadLine()
+		monitor.ReadLine()
 	}
 }
 
 func NetworkComp(ch chan string) {
 	for _ = range tick(time.Second) {
-		ip := bash(`ip -br a | grep -v "^lo" | grep -o '[0-9]*\.[0-9\.]*'`)
+		ip := bash(`(ip -br a | grep -v "^lo" | grep -o '[0-9]*\.[0-9\.]*') || echo ""`)
 		if ip == "" {
 			ip = "no network"
 		}
