@@ -142,10 +142,6 @@ func VolumeComp(ch chan string) {
 
 func NetworkComp(ch chan string) {
 	for _ = range tick(time.Second) {
-		ip := bash(`(ip -br a | grep -v "^lo" | grep -o '[0-9]*\.[0-9\.]*') || echo ""`)
-		if ip == "" {
-			ip = "no network"
-		}
-		ch <- ip
+		ch <- bash(`(ip -br a | grep -v "^lo" | grep -o '[0-9]*\.[0-9\.]*') || echo "no network"`)
 	}
 }
