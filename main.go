@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"os/exec"
@@ -12,12 +13,9 @@ import (
 	"time"
 )
 
-
 type Status struct {
 	name, value string
 }
-
-type RegFunc func(string, func(chan string))
 
 var templateRegex = regexp.MustCompile(`\{\w+\}`)
 
@@ -40,7 +38,7 @@ func main() {
 	values := make(map[string]string)
 
 	template := Configure(func(name string, producer func(chan string)) {
-		name = "{"+name+"}"
+		name = "{" + name + "}"
 		values[name] = ""
 		ch := make(chan string)
 		go producer(ch)
@@ -65,10 +63,17 @@ func checkErr(err error) {
 func bash(cmd string) string {
 	out, err := exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Command `%s` failed with `%s`. Maybe there is a dependency missing?\n", cmd, err)
+		fmt.Fprintf(os.Stderr, "Command `%s` failed with error `%s`", cmd, err)
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func assertCommandExists(cmd, reason string) {
+	_, err := exec.LookPath(cmd)
+	if err != nil {
+		log.Fatalf("Could not find %s in PATH. It is needed for %s", cmd, reason)
+	}
 }
 
 func tick(interval time.Duration) <-chan time.Time {
@@ -83,21 +88,43 @@ func tick(interval time.Duration) <-chan time.Time {
 	return ch
 }
 
-func newMonitor(s string, args ...string) *bufio.Reader {
+func newMonitor(s string, args ...string) *bufio.Scanner {
 	cmd := exec.Command(s, args...)
 	stdout, err := cmd.StdoutPipe()
 	checkErr(err)
-	reader := bufio.NewReader(stdout)
-	cmd.Start()
-	return reader
+	monitor := bufio.NewScanner(stdout)
+	checkErr(cmd.Start())
+	return monitor
 }
 
-func KbLayoutComp(interval time.Duration) func(chan string) {
+func KbLayoutPollComp(interval time.Duration) func(chan string) {
+	assertCommandExists("setxkbmap", "detecting keyboard layout")
+
 	return func(ch chan string) {
 		for _ = range tick(interval) {
-			ch <- bash(`setxkbmap -query | grep layout | sed -n -e 's/^layout:\s*//p'`)
+			ch <- getKeyboardLayout()
 		}
 	}
+}
+
+func KbLayoutComp(ch chan string) {
+	assertCommandExists("setxkbmap", "detecting keyboard layout")
+	assertCommandExists("xev", "watching for keyboard layout changes")
+
+	// I'm not sure how reliable/portable this is and it requires xev
+	// but works for me and gives instant keyboard layout indication
+	ch <- getKeyboardLayout()
+	monitor := newMonitor("xev", "-root", "-event", "property")
+	for monitor.Scan() {
+		if strings.Contains(monitor.Text(), "_XKB_RULES_NAMES") {
+			ch <- getKeyboardLayout()
+		}
+	}
+	checkErr(monitor.Err())
+}
+
+func getKeyboardLayout() string {
+	return bash(`setxkbmap -query | grep layout | sed -n -e 's/^layout:\s*//p'`)
 }
 
 func DateComp(format string) func(chan string) {
@@ -133,15 +160,23 @@ func BatteryFormat(charging bool, percent float64) string {
 }
 
 func VolumeComp(ch chan string) {
+	assertCommandExists("alsactl", "watching for changes in audio volume")
+	assertCommandExists("amixer", "detecting audio volume")
+
+	cmd := `amixer sget Master | grep 'Left:' | awk -F'[][]' '{ print $2 }'`
+	ch <- bash(cmd)
 	monitor := newMonitor("stdbuf", "-oL", "alsactl", "monitor")
-	for {
-		ch <- bash(`amixer sget Master | grep 'Left:' | awk -F'[][]' '{ print $2 }'`)
-		monitor.ReadLine()
+	for monitor.Scan() {
+		ch <- bash(cmd)
 	}
 }
 
-func NetworkComp(ch chan string) {
-	for _ = range tick(time.Second) {
-		ch <- bash(`(ip -br a | grep -v "^lo" | grep -o '[0-9]*\.[0-9\.]*') || echo "no network"`)
+func NetworkComp(interval time.Duration) func(chan string) {
+	assertCommandExists("ip", "detecting network status")
+
+	return func(ch chan string) {
+		for _ = range tick(interval) {
+			ch <- bash(`(ip -br a | grep -v "^lo" | grep -o '[0-9]*\.[0-9\.]*') || echo "no network"`)
+		}
 	}
 }
