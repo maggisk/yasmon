@@ -176,7 +176,7 @@ func NetworkComp(interval time.Duration) func(chan string) {
 
 	return func(ch chan string) {
 		for _ = range tick(interval) {
-			ch <- bash(`(ip -br a | grep -v "^lo" | grep -o '[0-9]*\.[0-9\.]*') || echo "no network"`)
+			ch <- bash(`((ip -br a | grep -v "^lo" | grep -o '[0-9]*\.[0-9\.]*') || echo "no network") | head -1`)
 		}
 	}
 }
