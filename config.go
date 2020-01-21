@@ -11,5 +11,12 @@ func Configure(register func(string, func(chan string))) string {
 	register("power", BatteryPowerComp(2*time.Second, " ", " "))
 	register("charge", BatteryChargeComp(time.Minute))
 
-	return " {network}   {backlight}%  墳 {volume}%  {power}{charge}%   {keyboard}  {date}"
+	// Go wild with our own bash commands (unread email, weather etc.)
+	// Pipes are supported, but anything more complex should probably go in a
+	// stand-alone bash script
+	register("weather", BashComp(time.Hour, `curl http://wttr.in/?format=1`))
+	// register("mail", BashComp(10 * time.Minute, `unreadmailcount`))
+	// register("status", BashComp(time.Second, `cat ~/somestatusfile`))
+
+	return " {weather}  {network}   {backlight}%  墳 {volume}%  {power}{charge}%   {keyboard}  {date}"
 }

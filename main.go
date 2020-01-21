@@ -50,7 +50,7 @@ func main() {
 		// fmt.Printf("%s=%s (was %s)\n", status.name, status.value, values[status.name])
 		if status.value != values[status.name] {
 			values[status.name] = status.value
-			exec.Command("xsetroot", "-name", formatTemplate(template, values)).Run()
+			checkErr(exec.Command("xsetroot", "-name", formatTemplate(template, values)).Run())
 		}
 	}
 }
@@ -67,7 +67,7 @@ func bash(cmd string) string {
 	out, err := exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Command `%s` failed with error `%s`\n", cmd, err)
-		fmt.Println("Maybe there's a dependency missing?")
+		fmt.Fprintln(os.Stderr, "Maybe there's a dependency missing?")
 		return "?"
 	}
 	return strings.TrimSpace(string(out))
@@ -155,5 +155,13 @@ func NetworkComp(interval time.Duration) func(chan string) {
 func BacklightComp(ch chan string) {
 	for _ = range tickSignal() {
 		ch <- strings.Split(bash(`xbacklight -get`), ".")[0]
+	}
+}
+
+func BashComp(interval time.Duration, cmd string) func(chan string) {
+	return func(ch chan string) {
+		for _ = range tickTime(interval) {
+			ch <- bash(cmd)
+		}
 	}
 }

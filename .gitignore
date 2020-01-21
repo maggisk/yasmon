@@ -1,1 +1,4 @@
 yasmon
+
+# to have a config not tracked by git, build with go build -o yasmon main.go local-config.go
+local-config.go

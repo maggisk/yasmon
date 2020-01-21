@@ -6,21 +6,19 @@ Simple, modular, customizable/hackable dwm status monitor written in go.
 
 ![Demo](https://raw.githubusercontent.com/maggisk/yasmon/master/demo.png)
 
-Each component runs in its own goroutine so you can configure different update intervals for
-different components.
-
 ## Goal
 Show instant feedback when changing volume/backlight/keyboard layout etc. yet let other components
 use long update intervals (e.g. weather component making http calls)
 
 ## How to
-clone it and `go build && ./yasmon`
+* Install dependencies (see below)
+* clone it and `go build && ./yasmon`
 
 Components for keyboard, backlight, volume etc. that are normally controlled through dwm keyboard
 actions are only updated when yasmon receives a SIGUSR1 signal. To get instant feedback after making
 such changes send a `killall -s USR1 yasmon`
 
-One simple way do to that is to make a bash file defining different action available through dwm
+One simple way to do that is to make a bash file defining different commands available through dwm
 and send USR1 at the end of that file. e.g.
 ```
 #!/usr/bin/env bash
@@ -37,10 +35,29 @@ esac
 killall -s USR1 yasmon
 ```
 
+Alternatively, if you just want it to update periodically, you can
+```
+while true; do
+    sleep 10
+    killall -s USR1 yasmon
+done
+```
+
+##  Builtin components
+See `config.go`
+
 ## Customize
 In spirit of dwm and simplicity, edit config.go and recompile.
 Default config expects dwm to be configured to use a [nerd font](https://www.nerdfonts.com/font-downloads).
 
 ## Extend
-Each component is just a go function accepting a `chan string` that writes to it any time to update the status bar.
+Each component is just a go function accepting a `chan string`. It runs in its own goroutine and
+sends a string through the channel at any time to update the status bar.
 See bottom of main.go for examples
+
+## Dependencies
+* go compiler [arch](https://www.archlinux.org/packages/community/x86_64/go/)
+* xsetroot to send status line to dwm [arch](https://www.archlinux.org/packages/extra/x86_64/xorg-xsetroot/)
+* xbacklight to use BacklightComp [arch](https://www.archlinux.org/packages/extra/x86_64/xorg-xbacklight/)
+* setxkbmap to use KeyboardLayoutComp [arch](https://www.archlinux.org/packages/extra/x86_64/xorg-setxkbmap/)
+* amixer to use VolumeComp [arch](https://www.archlinux.org/packages/extra/x86_64/alsa-utils/)
