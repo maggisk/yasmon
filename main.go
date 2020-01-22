@@ -15,11 +15,14 @@ import (
 
 /*** CORE ***/
 
+var (
+	templateRegex = regexp.MustCompile(`\{\w+\}`)
+	pingAddress = "8.8.8.8"
+)
+
 type Status struct {
 	name, value string
 }
-
-var templateRegex = regexp.MustCompile(`\{\w+\}`)
 
 func formatTemplate(template string, values map[string]string) string {
 	r := templateRegex.ReplaceAllFunc([]byte(template), func(key []byte) []byte {
@@ -47,8 +50,9 @@ func main() {
 
 	for {
 		status := <-master
-		// fmt.Printf("%s=%s (was %s)\n", status.name, status.value, values[status.name])
+		// fmt.Printf("%s=%s\n", status.name, status.value)
 		if status.value != values[status.name] {
+			// fmt.Println(formatTemplate(template, values))
 			values[status.name] = status.value
 			checkErr(exec.Command("xsetroot", "-name", formatTemplate(template, values)).Run())
 		}
@@ -67,7 +71,6 @@ func bash(cmd string) string {
 	out, err := exec.Command("bash", "-c", cmd).Output()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Command `%s` failed with error `%s`\n", cmd, err)
-		fmt.Fprintln(os.Stderr, "Maybe there's a dependency missing?")
 		return "?"
 	}
 	return strings.TrimSpace(string(out))
@@ -133,9 +136,32 @@ func BatteryChargeComp(interval time.Duration) func(chan string) {
 	}
 }
 
-func VolumeComp(ch chan string) {
-	for _ = range tickSignal() {
-		ch <- bash(`amixer sget Master | grep 'Left:' | awk -F'[][%]' '{ print $2 }'`)
+func VolumeComp(format func(bool, int) string) func(chan string) {
+	return func(ch chan string) {
+		for _ = range tickSignal() {
+			pair := strings.Fields(bash(`amixer get Master | grep 'Left:' | awk -F'[][%]' '{ print $2, $5 }'`))
+			if len(pair) >= 2 {
+				volume, err := strconv.Atoi(pair[0])
+				checkErr(err)
+				ch <- format(pair[1] == "off", volume)
+			}
+		}
+	}
+}
+
+func SimpleVolumeFormatter(muted, zero, low, high string) func(bool, int)string {
+	return func (isMuted bool, volume int) string {
+		icon := ""
+		if isMuted {
+			icon = muted
+		} else if volume == 0 {
+			icon = zero
+		} else if volume < 50 {
+			icon = low
+		} else {
+			icon = high
+		}
+		return fmt.Sprintf("%s %d", icon, volume)
 	}
 }
 
@@ -152,9 +178,28 @@ func NetworkComp(interval time.Duration) func(chan string) {
 	}
 }
 
+func HasNetworkComp(interval time.Duration, yes, no string) func(chan string) {
+	return func(ch chan string) {
+		for {
+			if exec.Command("ping", "-c", "1", pingAddress).Run() == nil {
+				ch <- yes
+			} else {
+				ch <- no
+			}
+			time.Sleep(interval)
+		}
+	}
+}
+
 func BacklightComp(ch chan string) {
 	for _ = range tickSignal() {
-		ch <- strings.Split(bash(`xbacklight -get`), ".")[0]
+		line := bash(`xbacklight -get`)
+		v, err := strconv.ParseFloat(line, 32)
+		if err != nil {
+			ch <- line
+		} else {
+			ch <- fmt.Sprintf("%.0f", v)
+		}
 	}
 }
 
@@ -162,6 +207,19 @@ func BashComp(interval time.Duration, cmd string) func(chan string) {
 	return func(ch chan string) {
 		for _ = range tickTime(interval) {
 			ch <- bash(cmd)
+		}
+	}
+}
+
+// wrapper around component that delays component initialization until we
+// have network connection
+func NeedsNetwork(component func(chan string)) func(chan string) {
+	return func(ch chan string) {
+		for {
+			if exec.Command("ping", "-c", "1", pingAddress).Run() == nil {
+				component(ch)
+				break
+			}
 		}
 	}
 }
