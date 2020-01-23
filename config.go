@@ -16,7 +16,7 @@ func Configure(register func(string, func(chan string))) string {
 	// Go wild with our own bash commands (unread email, weather etc.)
 	// Pipes are supported, but anything more complex should probably go in a
 	// stand-alone bash script
-	register("weather", NeedsNetwork(BashComp(time.Hour, `curl wttr.in/?format=1`)))
+	register("weather", NeedsNetwork(BashComp(10*time.Minute, `curl wttr.in/?format=1`)))
 	// register("status", BashComp(time.Second, `cat ~/somestatusfile`))
 
 	return " {weather}  {network}   {backlight}%  {volume}%  {power}{charge}%   {keyboard}  {date}"

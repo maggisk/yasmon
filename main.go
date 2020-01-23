@@ -15,10 +15,7 @@ import (
 
 /*** CORE ***/
 
-var (
-	templateRegex = regexp.MustCompile(`\{\w+\}`)
-	pingAddress = "8.8.8.8"
-)
+var templateRegex = regexp.MustCompile(`\{\w+\}`)
 
 type Status struct {
 	name, value string
@@ -50,9 +47,7 @@ func main() {
 
 	for {
 		status := <-master
-		// fmt.Printf("%s=%s\n", status.name, status.value)
 		if status.value != values[status.name] {
-			// fmt.Println(formatTemplate(template, values))
 			values[status.name] = status.value
 			checkErr(exec.Command("xsetroot", "-name", formatTemplate(template, values)).Run())
 		}
@@ -93,6 +88,10 @@ func tickSignal() <-chan os.Signal {
 	ch <- syscall.SIGUSR1
 	signal.Notify(ch, syscall.SIGUSR1)
 	return ch
+}
+
+func hasNetworkConnection() bool {
+	return exec.Command("ping", "-c", "1", "8.8.8.8").Run() == nil
 }
 
 /*** COMPONENTS ***/
@@ -149,8 +148,8 @@ func VolumeComp(format func(bool, int) string) func(chan string) {
 	}
 }
 
-func SimpleVolumeFormatter(muted, zero, low, high string) func(bool, int)string {
-	return func (isMuted bool, volume int) string {
+func SimpleVolumeFormatter(muted, zero, low, high string) func(bool, int) string {
+	return func(isMuted bool, volume int) string {
 		icon := ""
 		if isMuted {
 			icon = muted
@@ -180,13 +179,12 @@ func NetworkComp(interval time.Duration) func(chan string) {
 
 func HasNetworkComp(interval time.Duration, yes, no string) func(chan string) {
 	return func(ch chan string) {
-		for {
-			if exec.Command("ping", "-c", "1", pingAddress).Run() == nil {
+		for _ = range tickTime(interval) {
+			if hasNetworkConnection() {
 				ch <- yes
 			} else {
 				ch <- no
 			}
-			time.Sleep(interval)
 		}
 	}
 }
@@ -216,10 +214,11 @@ func BashComp(interval time.Duration, cmd string) func(chan string) {
 func NeedsNetwork(component func(chan string)) func(chan string) {
 	return func(ch chan string) {
 		for {
-			if exec.Command("ping", "-c", "1", pingAddress).Run() == nil {
+			if hasNetworkConnection() {
 				component(ch)
 				break
 			}
+			time.Sleep(time.Second / 10)
 		}
 	}
 }
