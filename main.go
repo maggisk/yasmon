@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"math"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -83,15 +85,32 @@ func tickTime(interval time.Duration) <-chan time.Time {
 	return ch
 }
 
-func tickSignal() <-chan os.Signal {
+func tickSignal(which syscall.Signal) <-chan os.Signal {
 	ch := make(chan os.Signal, 1)
-	ch <- syscall.SIGUSR1
-	signal.Notify(ch, syscall.SIGUSR1)
+	ch <- which
+	signal.Notify(ch, which)
 	return ch
+}
+
+func readFile(path string) string {
+	s, err := ioutil.ReadFile(path)
+	checkErr(err)
+	return strings.TrimSpace(string(s))
+}
+
+func atoi(s string) int {
+	i, err := strconv.Atoi(s)
+	checkErr(err)
+	return i
 }
 
 func hasNetworkConnection() bool {
 	return exec.Command("ping", "-c", "1", "8.8.8.8").Run() == nil
+}
+
+func batteryPath() string {
+	// Change this if it doesn't work for you!
+	return bash(`echo /sys/class/power_supply/BAT*`)
 }
 
 /*** COMPONENTS ***/
@@ -105,15 +124,16 @@ func DateComp(interval time.Duration, format string) func(chan string) {
 }
 
 func KeyboardLayoutComp(ch chan string) {
-	for _ = range tickSignal() {
+	for _ = range tickSignal(syscall.SIGUSR1) {
 		ch <- bash(`setxkbmap -query | grep layout | sed -n -e 's/^layout:\s*//p'`)
 	}
 }
 
 func BatteryPowerComp(interval time.Duration, charging string, discharging string) func(chan string) {
 	return func(ch chan string) {
+		root := batteryPath()
 		for _ = range tickTime(interval) {
-			if bash(`cat /sys/class/power_supply/BAT*/status`) == "Discharging" {
+			if readFile(path.Join(root, "status")) == "Discharging" {
 				ch <- discharging
 			} else {
 				ch <- charging
@@ -124,20 +144,19 @@ func BatteryPowerComp(interval time.Duration, charging string, discharging strin
 
 func BatteryChargeComp(interval time.Duration) func(chan string) {
 	return func(ch chan string) {
+		root := batteryPath()
 		for _ = range tickTime(interval) {
-			charge_full, err := strconv.Atoi(bash(`cat /sys/class/power_supply/BAT*/charge_full`))
-			checkErr(err)
-			charge_now, err := strconv.Atoi(bash(`cat /sys/class/power_supply/BAT*/charge_now`))
-			checkErr(err)
-			charge := math.Min(100.0, float64(charge_now)/float64(charge_full)*100.0)
-			ch <- fmt.Sprintf("%.0f", charge)
+			chargeFull := atoi(readFile(path.Join(root, "charge_full")))
+			chargeNow := atoi(readFile(path.Join(root, "charge_now")))
+			chargePct := math.Min(100.0, float64(chargeNow)/float64(chargeFull)*100.0)
+			ch <- fmt.Sprintf("%.0f", chargePct)
 		}
 	}
 }
 
 func VolumeComp(format func(bool, int) string) func(chan string) {
 	return func(ch chan string) {
-		for _ = range tickSignal() {
+		for _ = range tickSignal(syscall.SIGUSR1) {
 			pair := strings.Fields(bash(`amixer get Master | grep 'Left:' | awk -F'[][%]' '{ print $2, $5 }'`))
 			if len(pair) >= 2 {
 				volume, err := strconv.Atoi(pair[0])
@@ -190,7 +209,7 @@ func HasNetworkComp(interval time.Duration, yes, no string) func(chan string) {
 }
 
 func BacklightComp(ch chan string) {
-	for _ = range tickSignal() {
+	for _ = range tickSignal(syscall.SIGUSR1) {
 		line := bash(`xbacklight -get`)
 		v, err := strconv.ParseFloat(line, 32)
 		if err != nil {
