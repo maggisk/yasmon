@@ -232,12 +232,9 @@ func BashComp(interval time.Duration, cmd string) func(chan string) {
 // have network connection
 func NeedsNetwork(component func(chan string)) func(chan string) {
 	return func(ch chan string) {
-		for {
-			if hasNetworkConnection() {
-				component(ch)
-				break
-			}
+		for !hasNetworkConnection() {
 			time.Sleep(time.Second / 10)
 		}
+		component(ch)
 	}
 }
